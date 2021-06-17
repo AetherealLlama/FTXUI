@@ -93,15 +93,53 @@ TerminalInputParser::Output TerminalInputParser::Parse() {
   return ParseUTF8();
 }
 
+// Code point <-> UTF-8 conversion
+//
+// ┏━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+// ┃Byte 1  ┃Byte 2  ┃Byte 3  ┃Byte 4  ┃
+// ┡━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+// │0xxxxxxx│        │        │        │
+// ├────────┼────────┼────────┼────────┤
+// │110xxxxx│10xxxxxx│        │        │
+// ├────────┼────────┼────────┼────────┤
+// │1110xxxx│10xxxxxx│10xxxxxx│        │
+// ├────────┼────────┼────────┼────────┤
+// │11110xxx│10xxxxxx│10xxxxxx│10xxxxxx│
+// └────────┴────────┴────────┴────────┘
 TerminalInputParser::Output TerminalInputParser::ParseUTF8() {
   unsigned char head = static_cast<unsigned char>(Current());
-  for (int i = 0; i < 3; ++i, head <<= 1) {
-    if ((head & 0b11000000) != 0b11000000)
-      break;
-    if (!Eat())
-      return UNCOMPLETED;
+  unsigned char selector = 0b1000'0000;
+  int first_zero = 5;
+  for(int i = 0; i<8; ++i) {
+    if (head & selector) {
+      selector >>= 1;
+      continue;
+    }
+    first_zero = i;
   }
-  return CHARACTER;
+
+  // Single byte UTF-8
+  if (first_zero == 0)
+    return CHARACTER;
+
+  // Invalid UTF8, with more than 5 bytes.
+  if (first_zero >= 5)
+    return UNCOMPLETED;
+
+  // Two byte UTF-8
+  for(int i = 2; i<= first_zero; ++i) {
+    if (!Eat())
+      return CHARACTER;
+
+    head = static_cast<unsigned char>(Current());
+    if ((head & 0b1100'0000) != 0b1000'000)
+      return UNCOMPLETED;
+
+    if (first_zero == i)
+      return CHARACTER;
+  }
+
+  return UNCOMPLETED;
 }
 
 TerminalInputParser::Output TerminalInputParser::ParseESC() {
